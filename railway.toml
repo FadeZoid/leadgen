@@ -1,10 +1,8 @@
-# Deploy leadgen on Railway (recommended companion to the Vercel marketing site).
-# Connect this repo, set Root Directory to `leadgen`, add env vars from .env.example.
+# Railway reads env vars from the dashboard — no .env file in production.
 [build]
-builder = "NIXPACKS"
-buildCommand = "npm install"
+builder = "RAILPACK"
 
 [deploy]
-startCommand = "npm start"
+startCommand = "node src/server.js"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
