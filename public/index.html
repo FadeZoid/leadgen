@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>D&amp;V Partners — Lead &amp; Quote Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="dashboard.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230a0f1e'/%3E%3Cpath d='M8 22V10h5a6 6 0 0 1 0 12H8Z' fill='%2334f5c5'/%3E%3Cpath d='M19 10l3.5 12L26 10' stroke='%238b7bff' stroke-width='2.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+</head>
+<body>
+
+  <!-- Login -->
+  <div class="login-screen" id="loginScreen">
+    <form class="login-card" id="loginForm">
+      <div class="logo">
+        <img src="logo.png" alt="D&amp;V Partners" class="logo-img logo-img-login" />
+      </div>
+      <h1>Lead &amp; Quote Dashboard</h1>
+      <p>Automated prospecting with human approval. Sign in to review the outreach queue.</p>
+      <input type="password" id="loginPassword" placeholder="Dashboard password" autocomplete="current-password" required />
+      <button class="btn btn-primary" type="submit">Sign in</button>
+      <div class="login-error" id="loginError"></div>
+    </form>
+  </div>
+
+  <!-- App -->
+  <div class="app hidden" id="app">
+    <aside class="sidebar">
+      <div class="logo">
+        <img src="logo.png" alt="D&amp;V Partners" class="logo-img" />
+      </div>
+      <nav>
+        <button class="nav-item active" data-view="overview">
+          <svg viewBox="0 0 20 20" width="17" height="17"><rect x="3" y="3" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none"/><rect x="11" y="3" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none"/><rect x="3" y="11" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none"/><rect x="11" y="11" width="6" height="6" rx="1.5" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+          Overview
+        </button>
+        <button class="nav-item" data-view="discover">
+          <svg viewBox="0 0 20 20" width="17" height="17"><circle cx="9" cy="9" r="6" stroke="currentColor" stroke-width="1.6" fill="none"/><path d="m13.5 13.5 3.5 3.5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></svg>
+          Find Businesses
+        </button>
+        <button class="nav-item" data-view="email">
+          <svg viewBox="0 0 20 20" width="17" height="17"><rect x="2.5" y="4" width="15" height="12" rx="2.5" stroke="currentColor" stroke-width="1.5" fill="none"/><path d="m3.5 6 6.5 5 6.5-5" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Email Queue
+          <span class="badge" id="emailBadge">0</span>
+        </button>
+        <button class="nav-item" data-view="call">
+          <svg viewBox="0 0 20 20" width="17" height="17"><path d="M4 3.5h3L9 8l-2 1.5a11 11 0 0 0 4.5 4.5L13 12l4.5 2v3a1.5 1.5 0 0 1-1.7 1.5C8.7 17.8 2.2 11.3 3.5 4.2A1.5 1.5 0 0 1 4 3.5Z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/></svg>
+          Call Queue
+          <span class="badge" id="callBadge">0</span>
+        </button>
+        <button class="nav-item" data-view="letter">
+          <svg viewBox="0 0 20 20" width="17" height="17"><path d="M4 16.5V5a1.5 1.5 0 0 1 1.5-1.5h7L16 7v9.5a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 4 16.5Z" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linejoin="round"/><path d="M12 3.5V7h3.5M7 10.5h6M7 13.5h6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+          Letter Queue
+          <span class="badge" id="letterBadge">0</span>
+        </button>
+        <button class="nav-item" data-view="sent">
+          <svg viewBox="0 0 20 20" width="17" height="17"><path d="m3 10 4.5 4.5L17 5" stroke="currentColor" stroke-width="1.8" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Sent
+        </button>
+        <button class="nav-item" data-view="autosent">
+          <svg viewBox="0 0 20 20" width="17" height="17"><path d="M3 5.5h14M3 10h9M3 14.5h6" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/><circle cx="15.5" cy="13.5" r="2.5" stroke="currentColor" stroke-width="1.5" fill="none"/></svg>
+          Auto-sent log
+          <span class="badge" id="autoSentBadge">0</span>
+        </button>
+        <button class="nav-item" data-view="rejected">
+          <svg viewBox="0 0 20 20" width="17" height="17"><path d="m5 5 10 10M15 5 5 15" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>
+          Rejected
+        </button>
+      </nav>
+      <div class="sidebar-foot">
+        <label class="autosend-toggle" id="autoSendWrap" title="When on, new email-queue leads are sent automatically without approval">
+          <input type="checkbox" id="autoSendToggle" />
+          <span class="switch"></span>
+          <span class="autosend-label">Auto-send emails</span>
+        </label>
+        <div class="smtp-pill" id="smtpPill">SMTP: checking…</div>
+        <div class="smtp-pill" id="stannpPill">Post: checking…</div>
+        <button class="nav-item" id="logoutBtn">
+          <svg viewBox="0 0 20 20" width="17" height="17"><path d="M8 10h9m-3-3 3 3-3 3M11 4H5v12h6" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Sign out
+        </button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <!-- Overview -->
+      <section class="view active" id="view-overview">
+        <header class="view-head">
+          <div><h1>Overview</h1><p>Pipeline health at a glance.</p></div>
+          <button class="btn btn-primary" data-goto="discover">+ New discovery run</button>
+        </header>
+        <div class="stat-cards" id="statCards"></div>
+        <div class="panel">
+          <h2>Recent activity</h2>
+          <ul class="activity" id="activityList"><li class="muted">Nothing yet — run a discovery to get started.</li></ul>
+        </div>
+      </section>
+
+      <!-- Discover -->
+      <section class="view" id="view-discover">
+        <header class="view-head">
+          <div><h1>Find Businesses</h1><p>Discover card-machine-relevant businesses in an area, auto-build quotes, and queue them for your approval.</p></div>
+        </header>
+        <div class="panel">
+          <form id="discoverForm" class="discover-form">
+            <div class="form-grid">
+              <label>Town, city or postcode
+                <input type="text" id="dPlace" placeholder="e.g. Norwich, or NR1 1AA" required />
+              </label>
+              <label>Radius
+                <select id="dRadius">
+                  <option value="1000">1 km</option>
+                  <option value="2000" selected>2 km</option>
+                  <option value="4000">4 km</option>
+                  <option value="8000">8 km</option>
+                </select>
+              </label>
+              <label>Max businesses
+                <select id="dLimit">
+                  <option value="20">20</option>
+                  <option value="50" selected>50</option>
+                  <option value="100">100</option>
+                  <option value="200">200</option>
+                </select>
+              </label>
+            </div>
+            <div class="cat-picker">
+              <div class="cat-picker-head">
+                <span>Business types <small>(none selected = all)</small></span>
+                <button type="button" class="linklike" id="catClear">clear</button>
+              </div>
+              <div class="cat-grid" id="catGrid"></div>
+            </div>
+            <button class="btn btn-primary" type="submit" id="dSubmit">Run discovery</button>
+          </form>
+          <div class="job-progress hidden" id="jobProgress">
+            <div class="job-head"><span class="spinner"></span><b id="jobPhase">Working…</b></div>
+            <div class="job-stats" id="jobStats"></div>
+          </div>
+          <div class="job-error hidden" id="jobError"></div>
+        </div>
+        <div class="panel note-panel">
+          <h2>How it works</h2>
+          <ol class="how">
+            <li><b>Discover</b> — finds named businesses (cafés, restaurants, salons, shops…) via OpenStreetMap around your chosen area.</li>
+            <li><b>Enrich</b> — visits each business website to find a contact email automatically.</li>
+            <li><b>Quote</b> — estimates card turnover from the business type, local area, competition density and opening pattern, then prices it on the tier ladder. Floors: <b>0.4%</b> rate and <b>£15</b>/month rental for the highest earners.</li>
+            <li><b>Route</b> — each lead lands in the right queue: <b>Email</b> (has an address — approve or auto-send), <b>Call</b> (phone only — your team calls and logs the outcome), or <b>Letter</b> (no contact details — print &amp; post via Stannp or manually).</li>
+          </ol>
+        </div>
+      </section>
+
+      <!-- Queues -->
+      <section class="view" id="view-email">
+        <header class="view-head">
+          <div><h1>Email Queue</h1><p>Leads with a contact email. Approve individually, or send every queued quote in one go.</p></div>
+          <div class="filters view-actions">
+            <input type="search" id="searchEmail" placeholder="Search name or town…" />
+            <button class="btn btn-primary btn-sm" id="emailAllBtn" type="button">Email all</button>
+          </div>
+        </header>
+        <div class="lead-table" id="emailTable"></div>
+      </section>
+
+      <section class="view" id="view-call">
+        <header class="view-head">
+          <div><h1>Call Queue</h1><p>Leads with a phone number but no email — for your sales team to call. Log the outcome after each call.</p></div>
+          <div class="filters"><input type="search" id="searchCall" placeholder="Search name or town…" /></div>
+        </header>
+        <div class="lead-table" id="callTable"></div>
+      </section>
+
+      <section class="view" id="view-letter">
+        <header class="view-head">
+          <div><h1>Letter Queue</h1><p>No email, no phone. Approve to print &amp; post automatically via Stannp — or print manually if not connected.</p></div>
+          <div class="filters"><input type="search" id="searchLetter" placeholder="Search name or town…" /></div>
+        </header>
+        <div class="lead-table" id="letterTable"></div>
+      </section>
+
+      <section class="view" id="view-sent">
+        <header class="view-head"><div><h1>Sent</h1><p>Approved and delivered outreach.</p></div></header>
+        <div class="lead-table" id="sentTable"></div>
+      </section>
+
+      <section class="view" id="view-autosent">
+        <header class="view-head">
+          <div><h1>Auto-sent log</h1><p>Every quote emailed automatically — from discovery auto-send or the Email all button.</p></div>
+        </header>
+        <div class="auto-sent-table" id="autoSentTable"></div>
+      </section>
+
+      <section class="view" id="view-rejected">
+        <header class="view-head"><div><h1>Rejected</h1><p>Leads you decided not to contact.</p></div></header>
+        <div class="lead-table" id="rejectedTable"></div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Lead drawer -->
+  <div class="drawer-backdrop hidden" id="drawerBackdrop"></div>
+  <aside class="drawer hidden" id="drawer">
+    <div class="drawer-head">
+      <div>
+        <h2 id="drName">—</h2>
+        <div class="drawer-sub" id="drSub">—</div>
+      </div>
+      <button class="icon-btn" id="drawerClose" aria-label="Close">✕</button>
+    </div>
+    <div class="drawer-body" id="drawerBody"></div>
+  </aside>
+
+  <div class="toast" id="toast"></div>
+
+  <script src="dashboard.js"></script>
+</body>
+</html>
