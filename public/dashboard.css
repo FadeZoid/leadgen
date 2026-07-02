@@ -98,6 +98,7 @@ input, select, textarea { font-family: inherit; }
 .smtp-pill { font-size: 11.5px; color: var(--muted); padding: 8px 12px; border-radius: 9px; background: var(--surface); border: 1px solid var(--stroke); }
 .smtp-pill.ok { color: var(--mint); border-color: rgba(52,245,197,0.3); }
 .smtp-pill.warn { color: var(--amber); border-color: rgba(255,197,85,0.3); }
+.smtp-pill.error { color: #ff6b6b; border-color: rgba(255,107,107,0.35); }
 
 .main { padding: 30px 34px 60px; max-width: 1120px; }
 .view { display: none; animation: viewIn 0.4s var(--ease); }

@@ -9,17 +9,82 @@
 import nodemailer from "nodemailer";
 import { money } from "./quoting.js";
 
+function envValue(name) {
+  const raw = process.env[name];
+  if (raw == null || raw === "") return raw;
+  return String(raw).replace(/^["']|["']$/g, "").trim();
+}
+
 const BRAND = {
   mint: "#0fbf94",
   dark: "#0a0f1e",
   muted: "#5b6478",
   company: "D&V Partners",
   site: "https://dvpartners.org",
-  replyTo: process.env.REPLY_TO || "rafi@dvpartners.org",
+  get replyTo() {
+    return envValue("REPLY_TO") || "rafi@dvpartners.org";
+  },
 };
 
 export function smtpConfigured() {
-  return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS);
+  return Boolean(envValue("SMTP_HOST") && envValue("SMTP_USER") && envValue("SMTP_PASS"));
+}
+
+let transporter = null;
+let lastSmtpCheck = { ok: false, error: null, checkedAt: null };
+
+export function smtpStatus() {
+  return {
+    configured: smtpConfigured(),
+    verified: lastSmtpCheck.ok,
+    error: lastSmtpCheck.error,
+    checkedAt: lastSmtpCheck.checkedAt,
+    host: envValue("SMTP_HOST") || null,
+    port: Number(envValue("SMTP_PORT") || 587),
+    user: envValue("SMTP_USER") || null,
+  };
+}
+
+function resetTransporter() {
+  transporter = null;
+}
+
+function getTransporter() {
+  if (!smtpConfigured()) throw new Error("SMTP is not configured");
+  if (!transporter) {
+    const port = Number(envValue("SMTP_PORT") || 587);
+    transporter = nodemailer.createTransport({
+      host: envValue("SMTP_HOST"),
+      port,
+      secure: port === 465,
+      auth: {
+        user: envValue("SMTP_USER"),
+        pass: envValue("SMTP_PASS"),
+      },
+      connectionTimeout: 20_000,
+      greetingTimeout: 20_000,
+      socketTimeout: 30_000,
+      tls: { minVersion: "TLSv1.2" },
+    });
+  }
+  return transporter;
+}
+
+/** Verify SMTP login on startup or from the dashboard. */
+export async function verifySmtp() {
+  if (!smtpConfigured()) {
+    lastSmtpCheck = { ok: false, error: "SMTP_HOST, SMTP_USER and SMTP_PASS are required", checkedAt: new Date().toISOString() };
+    return lastSmtpCheck;
+  }
+  try {
+    resetTransporter();
+    await getTransporter().verify();
+    lastSmtpCheck = { ok: true, error: null, checkedAt: new Date().toISOString() };
+  } catch (err) {
+    lastSmtpCheck = { ok: false, error: err.message, checkedAt: new Date().toISOString() };
+    resetTransporter();
+  }
+  return lastSmtpCheck;
 }
 
 /**
@@ -138,19 +203,6 @@ export function renderLetter(lead) {
 </body></html>`;
 }
 
-let transporter = null;
-function getTransporter() {
-  if (!transporter) {
-    transporter = nodemailer.createTransport({
-      host: process.env.SMTP_HOST,
-      port: Number(process.env.SMTP_PORT || 587),
-      secure: Number(process.env.SMTP_PORT) === 465,
-      auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
-    });
-  }
-  return transporter;
-}
-
 /**
  * Send the quote email. Returns { delivered, dryRun, messageId? }.
  */
@@ -160,13 +212,19 @@ export async function sendQuoteEmail(lead) {
     console.log(`[dry-run] Would email ${lead.email}: "${subject}"`);
     return { delivered: false, dryRun: true };
   }
-  const info = await getTransporter().sendMail({
-    from: process.env.SMTP_FROM || `"D&V Partners" <${process.env.SMTP_USER}>`,
-    to: lead.email,
-    replyTo: BRAND.replyTo,
-    subject,
-    html,
-    text,
-  });
-  return { delivered: true, dryRun: false, messageId: info.messageId };
+  try {
+    const from = envValue("SMTP_FROM") || `"D&V Partners" <${envValue("SMTP_USER")}>`;
+    const info = await getTransporter().sendMail({
+      from,
+      to: lead.email,
+      replyTo: BRAND.replyTo,
+      subject,
+      html,
+      text,
+    });
+    return { delivered: true, dryRun: false, messageId: info.messageId };
+  } catch (err) {
+    resetTransporter();
+    throw new Error(`SMTP send failed: ${err.message}`);
+  }
 }

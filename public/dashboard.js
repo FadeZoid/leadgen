@@ -78,8 +78,20 @@
     $("#app").classList.remove("hidden");
 
     const smtp = $("#smtpPill");
-    if (meta.smtpConfigured) { smtp.textContent = "SMTP: connected"; smtp.classList.add("ok"); }
-    else { smtp.textContent = "SMTP: dry-run mode"; smtp.classList.add("warn"); }
+    smtp.classList.remove("ok", "warn", "error");
+    if (meta.smtp?.verified) {
+      smtp.textContent = "SMTP: connected";
+      smtp.classList.add("ok");
+      smtp.title = `${meta.smtp.host}:${meta.smtp.port} as ${meta.smtp.user}`;
+    } else if (meta.smtpConfigured) {
+      smtp.textContent = "SMTP: login failed";
+      smtp.classList.add("error");
+      smtp.title = meta.smtp?.error || "SMTP verification failed";
+    } else {
+      smtp.textContent = "SMTP: not configured";
+      smtp.classList.add("warn");
+      smtp.title = "Add SMTP_HOST, SMTP_USER and SMTP_PASS in Railway Variables";
+    }
 
     const post = $("#stannpPill");
     if (meta.stannpConfigured) { post.textContent = "Post: Stannp connected"; post.classList.add("ok"); }
@@ -351,9 +363,13 @@
       btn.textContent = "Sending…";
       const summary = await api("/leads/email-all", { method: "POST" });
       if (summary.sent === 0 && summary.failed === 0) {
-        toast("Nothing to send — queue may have changed");
-      } else if (summary.dryRun === summary.sent) {
-        toast(`Bulk complete — ${summary.sent} simulated (dry-run)`);
+        if (summary.skipped || summary.dryRun) {
+          toast("No emails sent — SMTP is not configured or login failed. Check Railway Variables.", true);
+        } else {
+          toast("Nothing to send — queue may have changed");
+        }
+      } else if (summary.dryRun && summary.sent === 0) {
+        toast(`No emails sent — ${summary.skipped || summary.dryRun} skipped (SMTP not ready)`, true);
       } else {
         toast(`Bulk complete — ${summary.sent} sent${summary.failed ? `, ${summary.failed} failed` : ""}`);
       }
@@ -417,7 +433,7 @@
         toast(`Letter ready for ${lead.name} — opening print view`);
         window.open(`/api/leads/${id}/letter?t=${Date.now()}`, "_blank");
       } else if (result.dryRun) {
-        toast(`Approved (dry-run) — configure SMTP to actually send`);
+        toast("Email not sent — SMTP is not configured or login failed. Check Railway Variables.", true);
       } else {
         toast(`Quote emailed to ${lead.email}`);
       }

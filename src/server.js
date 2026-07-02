@@ -32,7 +32,7 @@ import * as store from "./store.js";
 import { runDiscoveryJob, jobStatus, routeQueue } from "./pipeline.js";
 import { buildQuote, CATEGORY_PROFILES, PRICING_TIERS } from "./quoting.js";
 import { DISCOVERABLE_CATEGORIES } from "./discovery.js";
-import { renderQuoteEmail, renderLetter, smtpConfigured } from "./outreach.js";
+import { renderQuoteEmail, renderLetter, smtpConfigured, smtpStatus, verifySmtp } from "./outreach.js";
 import { dispatchQuoteEmail, sendAllEmailQueue } from "./emailDispatch.js";
 import { postLetterViaStannp, stannpConfigured } from "./postal.js";
 
@@ -68,9 +68,15 @@ app.get("/api/meta", auth, (req, res) => {
     categoryProfiles: CATEGORY_PROFILES,
     pricingTiers: PRICING_TIERS,
     smtpConfigured: smtpConfigured(),
+    smtp: smtpStatus(),
     stannpConfigured: stannpConfigured(),
     settings: store.getSettings(),
   });
+});
+
+app.post("/api/smtp/verify", auth, async (req, res) => {
+  const check = await verifySmtp();
+  res.json({ smtp: smtpStatus(), check });
 });
 
 app.patch("/api/settings", auth, (req, res) => {
@@ -312,7 +318,14 @@ app.use(express.static(path.join(__dirname, "..", "public")));
 
 app.listen(PORT, () => {
   console.log(`D&V lead dashboard running on http://localhost:${PORT}`);
-  if (!smtpConfigured()) console.log("SMTP not configured — outbound email is in dry-run mode.");
+  if (!smtpConfigured()) {
+    console.log("SMTP not configured — set SMTP_HOST, SMTP_USER and SMTP_PASS in Railway Variables.");
+  } else {
+    verifySmtp().then((check) => {
+      if (check.ok) console.log(`SMTP verified (${smtpStatus().host}:${smtpStatus().port})`);
+      else console.log(`SMTP configured but verification failed: ${check.error}`);
+    });
+  }
   if (!stannpConfigured()) console.log("Stannp not configured — letters fall back to manual print/post.");
   if (PASSWORD === "dvpartners") console.log('Using default password "dvpartners" — set DASH_PASSWORD in production.');
 });

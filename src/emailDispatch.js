@@ -14,12 +14,25 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export async function dispatchQuoteEmail(lead, { source = "manual" } = {}) {
   const result = await sendQuoteEmail(lead);
   const automated = source === "auto" || source === "bulk";
-  const via = result.dryRun
-    ? `email (dry-run${automated ? `, ${source}` : ""})`
-    : automated
-      ? `email (${source})`
-      : "email";
 
+  if (result.dryRun) {
+    const msg = automated
+      ? `${source === "bulk" ? "Bulk-send" : "Auto-send"} skipped for ${lead.name} — SMTP not configured on the server`
+      : `Approve skipped for ${lead.name} — SMTP not configured on the server`;
+    store.logActivity(msg, lead.id);
+    if (automated) {
+      store.logAutoSent({
+        leadId: lead.id,
+        name: lead.name,
+        email: lead.email,
+        dryRun: true,
+        source,
+      });
+    }
+    return result;
+  }
+
+  const via = automated ? `email (${source})` : "email";
   store.updateLead(lead.id, {
     status: "sent",
     sentAt: new Date().toISOString(),
@@ -31,23 +44,13 @@ export async function dispatchQuoteEmail(lead, { source = "manual" } = {}) {
       leadId: lead.id,
       name: lead.name,
       email: lead.email,
-      dryRun: Boolean(result.dryRun),
+      dryRun: false,
       source,
     });
     const verb = source === "bulk" ? "Bulk-sent" : "Auto-sent";
-    store.logActivity(
-      result.dryRun
-        ? `${verb} (dry-run): quote for ${lead.name} rendered — SMTP not configured`
-        : `${verb} quote to ${lead.name} <${lead.email}>`,
-      lead.id
-    );
+    store.logActivity(`${verb} quote to ${lead.name} <${lead.email}>`, lead.id);
   } else {
-    store.logActivity(
-      result.dryRun
-        ? `Approved ${lead.name} — email simulated (SMTP not configured)`
-        : `Approved ${lead.name} — quote emailed to ${lead.email}`,
-      lead.id
-    );
+    store.logActivity(`Approved ${lead.name} — quote emailed to ${lead.email}`, lead.id);
   }
 
   return result;
@@ -59,15 +62,19 @@ export async function sendAllEmailQueue({ delayMs = 400 } = {}) {
     .allLeads()
     .filter((l) => l.status === "review" && l.queue === "email" && l.email);
 
-  const summary = { total: leads.length, sent: 0, failed: 0, dryRun: 0, errors: [] };
+  const summary = { total: leads.length, sent: 0, failed: 0, dryRun: 0, skipped: 0, errors: [] };
 
   for (const lead of leads) {
     const latest = store.getLead(lead.id);
     if (!latest || latest.status !== "review" || latest.queue !== "email" || !latest.email) continue;
     try {
       const result = await dispatchQuoteEmail(latest, { source: "bulk" });
-      summary.sent++;
-      if (result.dryRun) summary.dryRun++;
+      if (result.dryRun) {
+        summary.skipped++;
+        summary.dryRun++;
+      } else {
+        summary.sent++;
+      }
       await sleep(delayMs);
     } catch (err) {
       summary.failed++;
@@ -79,7 +86,7 @@ export async function sendAllEmailQueue({ delayMs = 400 } = {}) {
   if (summary.total > 0) {
     store.logActivity(
       `Bulk email complete: ${summary.sent} sent` +
-        (summary.dryRun ? ` (${summary.dryRun} dry-run)` : "") +
+        (summary.skipped ? `, ${summary.skipped} skipped (SMTP not ready)` : "") +
         (summary.failed ? `, ${summary.failed} failed` : "")
     );
   }

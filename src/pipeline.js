@@ -139,8 +139,8 @@ export function runDiscoveryJob({ place, radiusM, categories, limit }) {
           const latest = store.getLead(lead.id);
           if (latest.queue !== "email" || latest.status !== "review") continue;
           try {
-            await dispatchQuoteEmail(latest, { source: "auto" });
-            currentJob.autoSent++;
+            const result = await dispatchQuoteEmail(latest, { source: "auto" });
+            if (!result.dryRun) currentJob.autoSent++;
             await sleep(400); // gentle send pacing
           } catch (err) {
             store.logActivity(`Auto-send failed for ${latest.name}: ${err.message} — left in email queue`, latest.id);
