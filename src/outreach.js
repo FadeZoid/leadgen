@@ -7,12 +7,29 @@
  *    to post to the business address.
  */
 import nodemailer from "nodemailer";
+import dns from "node:dns";
 import { money } from "./quoting.js";
+
+/** Railway/cloud SMTP often resolves IPv6 first; many mail hosts reject it. */
+function ipv4Lookup(hostname, _opts, callback) {
+  dns.lookup(hostname, { family: 4 }, callback);
+}
 
 function envValue(name) {
   const raw = process.env[name];
   if (raw == null || raw === "") return raw;
   return String(raw).replace(/^["']|["']$/g, "").trim();
+}
+
+function smtpPassword() {
+  const raw = process.env.SMTP_PASS;
+  if (raw == null || raw === "") return raw;
+  // Railway paste often adds a trailing newline — breaks auth while local .env works.
+  return String(raw).replace(/^["']|["']$/g, "").replace(/\r?\n/g, "").trim();
+}
+
+function smtpUser() {
+  return envValue("SMTP_USER");
 }
 
 const BRAND = {
@@ -27,63 +44,138 @@ const BRAND = {
 };
 
 export function smtpConfigured() {
-  return Boolean(envValue("SMTP_HOST") && envValue("SMTP_USER") && envValue("SMTP_PASS"));
+  return Boolean(envValue("SMTP_HOST") && smtpUser() && smtpPassword());
 }
 
 let transporter = null;
-let lastSmtpCheck = { ok: false, error: null, checkedAt: null };
+let activeTransportKey = null;
+let lastSmtpCheck = { ok: false, error: null, checkedAt: null, mode: null };
 
-export function smtpStatus() {
+function transportProfiles() {
+  const preferred = Number(envValue("SMTP_PORT") || 465);
+  const profiles = [
+    { port: preferred, secure: preferred === 465, label: `env:${preferred}` },
+    { port: 587, secure: false, requireTLS: true, label: "587-starttls" },
+    { port: 465, secure: true, label: "465-ssl" },
+  ];
+  const seen = new Set();
+  return profiles.filter((p) => {
+    const key = `${p.port}/${p.secure}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function buildTransport(profile) {
+  const { port, secure, requireTLS, label } = profile;
+  return {
+    transport: nodemailer.createTransport({
+      host: envValue("SMTP_HOST"),
+      port,
+      secure,
+      requireTLS: Boolean(requireTLS),
+      auth: {
+        user: smtpUser(),
+        pass: smtpPassword(),
+      },
+      connectionTimeout: 25_000,
+      greetingTimeout: 25_000,
+      socketTimeout: 35_000,
+      tls: { minVersion: "TLSv1.2", servername: envValue("SMTP_HOST") },
+      lookup: ipv4Lookup,
+    }),
+    key: label || `${port}/${secure}`,
+  };
+}
+
+export function smtpDiagnostics() {
+  const pass = smtpPassword() || "";
+  const user = smtpUser() || "";
   return {
     configured: smtpConfigured(),
+    host: envValue("SMTP_HOST") || null,
+    port: Number(envValue("SMTP_PORT") || 465),
+    user,
+    userLength: user.length,
+    passLength: pass.length,
+    passHadNewline: Boolean(process.env.SMTP_PASS && /\r|\n/.test(process.env.SMTP_PASS)),
     verified: lastSmtpCheck.ok,
     error: lastSmtpCheck.error,
+    mode: lastSmtpCheck.mode,
     checkedAt: lastSmtpCheck.checkedAt,
-    host: envValue("SMTP_HOST") || null,
-    port: Number(envValue("SMTP_PORT") || 587),
-    user: envValue("SMTP_USER") || null,
+  };
+}
+
+export function smtpStatus() {
+  const d = smtpDiagnostics();
+  return {
+    configured: d.configured,
+    verified: d.verified,
+    error: d.error,
+    checkedAt: d.checkedAt,
+    host: d.host,
+    port: d.port,
+    user: d.user,
+    mode: d.mode,
   };
 }
 
 function resetTransporter() {
   transporter = null;
+  activeTransportKey = null;
 }
 
 function getTransporter() {
   if (!smtpConfigured()) throw new Error("SMTP is not configured");
   if (!transporter) {
-    const port = Number(envValue("SMTP_PORT") || 587);
-    transporter = nodemailer.createTransport({
-      host: envValue("SMTP_HOST"),
-      port,
-      secure: port === 465,
-      auth: {
-        user: envValue("SMTP_USER"),
-        pass: envValue("SMTP_PASS"),
-      },
-      connectionTimeout: 20_000,
-      greetingTimeout: 20_000,
-      socketTimeout: 30_000,
-      tls: { minVersion: "TLSv1.2" },
-    });
+    const profile = transportProfiles()[0];
+    const built = buildTransport(profile);
+    transporter = built.transport;
+    activeTransportKey = built.key;
   }
   return transporter;
 }
 
-/** Verify SMTP login on startup or from the dashboard. */
+/** Try preferred port then Spacemail-compatible fallbacks (587 STARTTLS / 465 SSL). */
 export async function verifySmtp() {
   if (!smtpConfigured()) {
-    lastSmtpCheck = { ok: false, error: "SMTP_HOST, SMTP_USER and SMTP_PASS are required", checkedAt: new Date().toISOString() };
+    lastSmtpCheck = {
+      ok: false,
+      error: "SMTP_HOST, SMTP_USER and SMTP_PASS are required",
+      checkedAt: new Date().toISOString(),
+      mode: null,
+    };
     return lastSmtpCheck;
   }
-  try {
-    resetTransporter();
-    await getTransporter().verify();
-    lastSmtpCheck = { ok: true, error: null, checkedAt: new Date().toISOString() };
-  } catch (err) {
-    lastSmtpCheck = { ok: false, error: err.message, checkedAt: new Date().toISOString() };
-    resetTransporter();
+
+  const errors = [];
+  for (const profile of transportProfiles()) {
+    const { transport, key } = buildTransport(profile);
+    try {
+      await transport.verify();
+      transporter = transport;
+      activeTransportKey = key;
+      lastSmtpCheck = { ok: true, error: null, checkedAt: new Date().toISOString(), mode: key };
+      console.log(`SMTP verified via ${key} (${envValue("SMTP_HOST")}:${profile.port})`);
+      return lastSmtpCheck;
+    } catch (err) {
+      errors.push(`${key}: ${err.message}`);
+      try {
+        transport.close();
+      } catch {
+        /* ignore */
+      }
+    }
   }
+
+  resetTransporter();
+  lastSmtpCheck = {
+    ok: false,
+    error: errors.join(" | "),
+    checkedAt: new Date().toISOString(),
+    mode: null,
+  };
   return lastSmtpCheck;
 }
 
@@ -213,7 +305,8 @@ export async function sendQuoteEmail(lead) {
     return { delivered: false, dryRun: true };
   }
   try {
-    const from = envValue("SMTP_FROM") || `"D&V Partners" <${envValue("SMTP_USER")}>`;
+    if (!lastSmtpCheck.ok) await verifySmtp();
+    const from = envValue("SMTP_FROM") || `"D&V Partners" <${smtpUser()}>`;
     const info = await getTransporter().sendMail({
       from,
       to: lead.email,

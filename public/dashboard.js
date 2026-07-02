@@ -77,21 +77,7 @@
     $("#loginScreen").classList.add("hidden");
     $("#app").classList.remove("hidden");
 
-    const smtp = $("#smtpPill");
-    smtp.classList.remove("ok", "warn", "error");
-    if (meta.smtp?.verified) {
-      smtp.textContent = "SMTP: connected";
-      smtp.classList.add("ok");
-      smtp.title = `${meta.smtp.host}:${meta.smtp.port} as ${meta.smtp.user}`;
-    } else if (meta.smtpConfigured) {
-      smtp.textContent = "SMTP: login failed";
-      smtp.classList.add("error");
-      smtp.title = meta.smtp?.error || "SMTP verification failed";
-    } else {
-      smtp.textContent = "SMTP: not configured";
-      smtp.classList.add("warn");
-      smtp.title = "Add SMTP_HOST, SMTP_USER and SMTP_PASS in Railway Variables";
-    }
+    renderSmtpPill();
 
     const post = $("#stannpPill");
     if (meta.stannpConfigured) { post.textContent = "Post: Stannp connected"; post.classList.add("ok"); }
@@ -100,11 +86,48 @@
     $("#autoSendToggle").checked = Boolean(meta.settings?.autoSendEmail);
 
     buildCategoryChips();
+    $("#smtpPill")?.addEventListener("click", retrySmtpVerify);
+    renderSmtpPill();
     await refreshAll();
     pollTimer = setInterval(refreshAll, 5000);
   }
 
   /* ---------------- Settings ---------------- */
+  function renderSmtpPill() {
+    const smtp = $("#smtpPill");
+    if (!smtp || !meta) return;
+    smtp.classList.remove("ok", "warn", "error");
+    if (meta.smtp?.verified) {
+      smtp.textContent = "SMTP: connected";
+      smtp.classList.add("ok");
+      smtp.title = `${meta.smtp.host || ""}:${meta.smtp.port || ""} via ${meta.smtp.mode || "smtp"}`;
+    } else if (meta.smtpConfigured) {
+      smtp.textContent = "SMTP: login failed";
+      smtp.classList.add("error");
+      smtp.title = (meta.smtp?.error || "SMTP verification failed") + " — click to retry";
+    } else {
+      smtp.textContent = "SMTP: not configured";
+      smtp.classList.add("warn");
+      smtp.title = "Add SMTP_HOST, SMTP_USER and SMTP_PASS in Railway Variables";
+    }
+  }
+
+  async function retrySmtpVerify() {
+    try {
+      const { check, diagnostics, smtp } = await api("/smtp/verify", { method: "POST" });
+      meta.smtpConfigured = Boolean(diagnostics?.configured);
+      meta.smtp = smtp || meta.smtp;
+      renderSmtpPill();
+      if (check.ok) toast(`SMTP connected (${check.mode})`);
+      else {
+        const hint = diagnostics?.passHadNewline ? " Password may have a trailing newline in Railway." : "";
+        toast(`SMTP failed: ${check.error}${hint}`, true);
+      }
+    } catch (err) {
+      toast(err.message, true);
+    }
+  }
+
   $("#autoSendToggle").addEventListener("change", async (e) => {
     try {
       const settings = await api("/settings", {

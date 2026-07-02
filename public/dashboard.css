@@ -95,7 +95,7 @@ input, select, textarea { font-family: inherit; }
 .nav-item.active { background: rgba(52,245,197,0.09); color: var(--mint); }
 .badge { margin-left: auto; background: var(--grad); color: #051018; font-size: 11px; font-weight: 700; border-radius: 999px; padding: 1px 8px; }
 .sidebar-foot { margin-top: auto; display: grid; gap: 10px; }
-.smtp-pill { font-size: 11.5px; color: var(--muted); padding: 8px 12px; border-radius: 9px; background: var(--surface); border: 1px solid var(--stroke); }
+.smtp-pill { font-size: 11.5px; color: var(--muted); padding: 8px 12px; border-radius: 9px; background: var(--surface); border: 1px solid var(--stroke); cursor: pointer; }
 .smtp-pill.ok { color: var(--mint); border-color: rgba(52,245,197,0.3); }
 .smtp-pill.warn { color: var(--amber); border-color: rgba(255,197,85,0.3); }
 .smtp-pill.error { color: #ff6b6b; border-color: rgba(255,107,107,0.35); }

@@ -32,7 +32,7 @@ import * as store from "./store.js";
 import { runDiscoveryJob, jobStatus, routeQueue } from "./pipeline.js";
 import { buildQuote, CATEGORY_PROFILES, PRICING_TIERS } from "./quoting.js";
 import { DISCOVERABLE_CATEGORIES } from "./discovery.js";
-import { renderQuoteEmail, renderLetter, smtpConfigured, smtpStatus, verifySmtp } from "./outreach.js";
+import { renderQuoteEmail, renderLetter, smtpConfigured, smtpStatus, smtpDiagnostics, verifySmtp } from "./outreach.js";
 import { dispatchQuoteEmail, sendAllEmailQueue } from "./emailDispatch.js";
 import { postLetterViaStannp, stannpConfigured } from "./postal.js";
 
@@ -76,7 +76,7 @@ app.get("/api/meta", auth, (req, res) => {
 
 app.post("/api/smtp/verify", auth, async (req, res) => {
   const check = await verifySmtp();
-  res.json({ smtp: smtpStatus(), check });
+  res.json({ smtp: smtpStatus(), diagnostics: smtpDiagnostics(), check });
 });
 
 app.patch("/api/settings", auth, (req, res) => {
