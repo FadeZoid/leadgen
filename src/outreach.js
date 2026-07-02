@@ -93,22 +93,47 @@ async function verifyResend() {
     };
     return lastSmtpCheck;
   }
+
+  const key = envValue("RESEND_API_KEY");
+  if (!key.startsWith("re_")) {
+    lastSmtpCheck = {
+      ok: false,
+      error: "RESEND_API_KEY should start with re_",
+      checkedAt: new Date().toISOString(),
+      mode: null,
+    };
+    return lastSmtpCheck;
+  }
+
   try {
     const res = await fetch("https://api.resend.com/domains", {
-      headers: { Authorization: `Bearer ${envValue("RESEND_API_KEY")}` },
+      headers: { Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(15_000),
     });
     const body = await res.json().catch(() => ({}));
     if (!res.ok) {
-      throw new Error(body.message || body.error || `Resend HTTP ${res.status}`);
+      const msg = body.message || body.error || `Resend HTTP ${res.status}`;
+      // Send-only API keys cannot list domains — still valid for sending quotes.
+      if (/restricted to only send/i.test(msg)) {
+        lastSmtpCheck = {
+          ok: true,
+          error: null,
+          checkedAt: new Date().toISOString(),
+          mode: "resend",
+        };
+        console.log("Resend send-only API key ready");
+        return lastSmtpCheck;
+      }
+      throw new Error(msg);
     }
     const verified = (body.data || []).some((d) => d.status === "verified");
     lastSmtpCheck = {
       ok: true,
-      error: verified ? null : "API key OK — add/verify dvpartners.org in Resend if sends fail",
+      error: verified ? null : "Add/verify dvpartners.org in Resend if sends fail",
       checkedAt: new Date().toISOString(),
       mode: "resend",
     };
-    console.log("Resend API verified");
+    console.log(`Resend API verified${verified ? " (domain verified)" : ""}`);
     return lastSmtpCheck;
   } catch (err) {
     lastSmtpCheck = {
@@ -428,7 +453,7 @@ export async function sendQuoteEmail(lead) {
       if (!lastSmtpCheck.ok) throw new Error(lastSmtpCheck.error || "Resend not ready");
       return await sendViaResend({ to: lead.email, subject, html, text });
     } catch (err) {
-      throw new Error(`Resend send failed: ${err.message}`);
+      throw new Error(err.message.startsWith("Resend") ? err.message : `Resend send failed: ${err.message}`);
     }
   }
 
