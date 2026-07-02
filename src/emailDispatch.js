@@ -17,8 +17,8 @@ export async function dispatchQuoteEmail(lead, { source = "manual" } = {}) {
 
   if (result.dryRun) {
     const msg = automated
-      ? `${source === "bulk" ? "Bulk-send" : "Auto-send"} skipped for ${lead.name} — SMTP not configured on the server`
-      : `Approve skipped for ${lead.name} — SMTP not configured on the server`;
+      ? `${source === "bulk" ? "Bulk-send" : "Auto-send"} skipped for ${lead.name} — no email provider (add RESEND_API_KEY on Railway)`
+      : `Approve skipped for ${lead.name} — no email provider configured`;
     store.logActivity(msg, lead.id);
     if (automated) {
       store.logAutoSent({

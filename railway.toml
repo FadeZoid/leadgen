@@ -1,6 +1,9 @@
 # Railway reads env vars from the dashboard — no .env file in production.
-# Discovery includes website email scraping by default (slower but finds more emails).
-# Set SKIP_ENRICHMENT=true only if you need faster map-only runs.
+# Railway Hobby/Free blocks outbound SMTP (ports 465 & 587). Use Resend instead:
+#   RESEND_API_KEY=re_xxxx
+#   EMAIL_FROM=D&V Partners <rafi@dvpartners.org>
+# Verify dvpartners.org at https://resend.com/domains
+# Local dev can still use SMTP_* below.
 [build]
 builder = "RAILPACK"
 

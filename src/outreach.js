@@ -32,6 +32,115 @@ function smtpUser() {
   return envValue("SMTP_USER");
 }
 
+function isRailway() {
+  return Boolean(process.env.RAILWAY_ENVIRONMENT);
+}
+
+export function resendConfigured() {
+  return Boolean(envValue("RESEND_API_KEY"));
+}
+
+/** True when email can be sent (Resend API or direct SMTP). */
+export function emailConfigured() {
+  return resendConfigured() || smtpConfigured();
+}
+
+export function emailProvider() {
+  if (resendConfigured()) return "resend";
+  if (smtpConfigured()) return "smtp";
+  return null;
+}
+
+function emailFrom() {
+  return (
+    envValue("EMAIL_FROM") ||
+    envValue("RESEND_FROM") ||
+    envValue("SMTP_FROM") ||
+    `"D&V Partners" <${envValue("REPLY_TO") || "rafi@dvpartners.org"}>`
+  );
+}
+
+async function sendViaResend({ to, subject, html, text }) {
+  const res = await fetch("https://api.resend.com/emails", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${envValue("RESEND_API_KEY")}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      from: emailFrom(),
+      to: [to],
+      reply_to: BRAND.replyTo,
+      subject,
+      html,
+      text,
+    }),
+  });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(body.message || body.error || `Resend HTTP ${res.status}`);
+  }
+  return { delivered: true, dryRun: false, messageId: body.id, provider: "resend" };
+}
+
+async function verifyResend() {
+  if (!resendConfigured()) {
+    lastSmtpCheck = {
+      ok: false,
+      error: "RESEND_API_KEY is required",
+      checkedAt: new Date().toISOString(),
+      mode: null,
+    };
+    return lastSmtpCheck;
+  }
+  try {
+    const res = await fetch("https://api.resend.com/domains", {
+      headers: { Authorization: `Bearer ${envValue("RESEND_API_KEY")}` },
+    });
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(body.message || body.error || `Resend HTTP ${res.status}`);
+    }
+    const verified = (body.data || []).some((d) => d.status === "verified");
+    lastSmtpCheck = {
+      ok: true,
+      error: verified ? null : "API key OK — add/verify dvpartners.org in Resend if sends fail",
+      checkedAt: new Date().toISOString(),
+      mode: "resend",
+    };
+    console.log("Resend API verified");
+    return lastSmtpCheck;
+  } catch (err) {
+    lastSmtpCheck = {
+      ok: false,
+      error: err.message,
+      checkedAt: new Date().toISOString(),
+      mode: null,
+    };
+    return lastSmtpCheck;
+  }
+}
+
+/** Prefer Resend on Railway (SMTP ports blocked on Hobby/Free). */
+export async function verifyEmail() {
+  if (resendConfigured()) return verifyResend();
+  if (smtpConfigured()) {
+    const result = await verifySmtp();
+    if (!result.ok && isRailway()) {
+      result.error +=
+        " | Railway Hobby/Free blocks outbound SMTP (ports 465 & 587). Add RESEND_API_KEY instead, or upgrade to Railway Pro.";
+    }
+    return result;
+  }
+  lastSmtpCheck = {
+    ok: false,
+    error: "No email provider configured",
+    checkedAt: new Date().toISOString(),
+    mode: null,
+  };
+  return lastSmtpCheck;
+}
+
 const BRAND = {
   mint: "#0fbf94",
   dark: "#0a0f1e",
@@ -93,13 +202,22 @@ export function smtpDiagnostics() {
   const pass = smtpPassword() || "";
   const user = smtpUser() || "";
   return {
-    configured: smtpConfigured(),
+    configured: emailConfigured(),
+    provider: emailProvider(),
+    resend: resendConfigured(),
+    smtp: smtpConfigured(),
+    railway: isRailway(),
+    railwayBlocksSmtp: isRailway() && smtpConfigured() && !resendConfigured(),
+    hint: isRailway() && smtpConfigured() && !resendConfigured()
+      ? "Railway blocks SMTP ports 465/587 on Hobby & Free. Add RESEND_API_KEY."
+      : null,
     host: envValue("SMTP_HOST") || null,
     port: Number(envValue("SMTP_PORT") || 465),
     user,
     userLength: user.length,
     passLength: pass.length,
     passHadNewline: Boolean(process.env.SMTP_PASS && /\r|\n/.test(process.env.SMTP_PASS)),
+    from: emailFrom(),
     verified: lastSmtpCheck.ok,
     error: lastSmtpCheck.error,
     mode: lastSmtpCheck.mode,
@@ -111,6 +229,7 @@ export function smtpStatus() {
   const d = smtpDiagnostics();
   return {
     configured: d.configured,
+    provider: d.provider,
     verified: d.verified,
     error: d.error,
     checkedAt: d.checkedAt,
@@ -118,6 +237,8 @@ export function smtpStatus() {
     port: d.port,
     user: d.user,
     mode: d.mode,
+    railwayBlocksSmtp: d.railwayBlocksSmtp,
+    hint: d.hint,
   };
 }
 
@@ -300,13 +421,24 @@ export function renderLetter(lead) {
  */
 export async function sendQuoteEmail(lead) {
   const { subject, html, text } = renderQuoteEmail(lead);
+
+  if (resendConfigured()) {
+    try {
+      if (!lastSmtpCheck.ok || lastSmtpCheck.mode !== "resend") await verifyResend();
+      if (!lastSmtpCheck.ok) throw new Error(lastSmtpCheck.error || "Resend not ready");
+      return await sendViaResend({ to: lead.email, subject, html, text });
+    } catch (err) {
+      throw new Error(`Resend send failed: ${err.message}`);
+    }
+  }
+
   if (!smtpConfigured()) {
     console.log(`[dry-run] Would email ${lead.email}: "${subject}"`);
     return { delivered: false, dryRun: true };
   }
   try {
     if (!lastSmtpCheck.ok) await verifySmtp();
-    const from = envValue("SMTP_FROM") || `"D&V Partners" <${smtpUser()}>`;
+    const from = emailFrom();
     const info = await getTransporter().sendMail({
       from,
       to: lead.email,
@@ -315,9 +447,12 @@ export async function sendQuoteEmail(lead) {
       html,
       text,
     });
-    return { delivered: true, dryRun: false, messageId: info.messageId };
+    return { delivered: true, dryRun: false, messageId: info.messageId, provider: "smtp" };
   } catch (err) {
     resetTransporter();
-    throw new Error(`SMTP send failed: ${err.message}`);
+    const hint = isRailway()
+      ? " (Railway Hobby/Free blocks SMTP — use RESEND_API_KEY)"
+      : "";
+    throw new Error(`SMTP send failed: ${err.message}${hint}`);
   }
 }

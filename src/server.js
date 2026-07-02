@@ -32,7 +32,7 @@ import * as store from "./store.js";
 import { runDiscoveryJob, jobStatus, routeQueue } from "./pipeline.js";
 import { buildQuote, CATEGORY_PROFILES, PRICING_TIERS } from "./quoting.js";
 import { DISCOVERABLE_CATEGORIES } from "./discovery.js";
-import { renderQuoteEmail, renderLetter, smtpConfigured, smtpStatus, smtpDiagnostics, verifySmtp } from "./outreach.js";
+import { renderQuoteEmail, renderLetter, smtpConfigured, emailConfigured, smtpStatus, smtpDiagnostics, verifyEmail } from "./outreach.js";
 import { dispatchQuoteEmail, sendAllEmailQueue } from "./emailDispatch.js";
 import { postLetterViaStannp, stannpConfigured } from "./postal.js";
 
@@ -67,7 +67,9 @@ app.get("/api/meta", auth, (req, res) => {
     categories: DISCOVERABLE_CATEGORIES,
     categoryProfiles: CATEGORY_PROFILES,
     pricingTiers: PRICING_TIERS,
-    smtpConfigured: smtpConfigured(),
+    smtpConfigured: emailConfigured(),
+    emailConfigured: emailConfigured(),
+    emailProvider: smtpStatus().provider,
     smtp: smtpStatus(),
     stannpConfigured: stannpConfigured(),
     settings: store.getSettings(),
@@ -75,7 +77,7 @@ app.get("/api/meta", auth, (req, res) => {
 });
 
 app.post("/api/smtp/verify", auth, async (req, res) => {
-  const check = await verifySmtp();
+  const check = await verifyEmail();
   res.json({ smtp: smtpStatus(), diagnostics: smtpDiagnostics(), check });
 });
 
@@ -318,12 +320,12 @@ app.use(express.static(path.join(__dirname, "..", "public")));
 
 app.listen(PORT, () => {
   console.log(`D&V lead dashboard running on http://localhost:${PORT}`);
-  if (!smtpConfigured()) {
-    console.log("SMTP not configured — set SMTP_HOST, SMTP_USER and SMTP_PASS in Railway Variables.");
+  if (!emailConfigured()) {
+    console.log("Email not configured — set RESEND_API_KEY (Railway) or SMTP_* (local).");
   } else {
-    verifySmtp().then((check) => {
-      if (check.ok) console.log(`SMTP verified (${smtpStatus().host}:${smtpStatus().port})`);
-      else console.log(`SMTP configured but verification failed: ${check.error}`);
+    verifyEmail().then((check) => {
+      if (check.ok) console.log(`Email verified via ${check.mode}`);
+      else console.log(`Email configured but verification failed: ${check.error}`);
     });
   }
   if (!stannpConfigured()) console.log("Stannp not configured — letters fall back to manual print/post.");

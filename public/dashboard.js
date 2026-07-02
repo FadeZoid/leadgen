@@ -98,17 +98,25 @@
     if (!smtp || !meta) return;
     smtp.classList.remove("ok", "warn", "error");
     if (meta.smtp?.verified) {
-      smtp.textContent = "SMTP: connected";
+      const via = meta.smtp.mode === "resend" ? "Resend" : meta.smtp.mode || "SMTP";
+      smtp.textContent = `Email: ${via}`;
       smtp.classList.add("ok");
-      smtp.title = `${meta.smtp.host || ""}:${meta.smtp.port || ""} via ${meta.smtp.mode || "smtp"}`;
+      smtp.title = meta.smtp.mode === "resend"
+        ? "Sending via Resend API (HTTPS)"
+        : `${meta.smtp.host || ""}:${meta.smtp.port || ""}`;
     } else if (meta.smtpConfigured) {
-      smtp.textContent = "SMTP: login failed";
+      smtp.textContent = "Email: failed";
       smtp.classList.add("error");
-      smtp.title = (meta.smtp?.error || "SMTP verification failed") + " — click to retry";
+      const railwayHint = meta.smtp?.railwayBlocksSmtp
+        ? " Railway Hobby/Free blocks SMTP — add RESEND_API_KEY."
+        : "";
+      smtp.title = (meta.smtp?.error || "Email verification failed") + railwayHint + " — click to retry";
     } else {
-      smtp.textContent = "SMTP: not configured";
+      smtp.textContent = "Email: not configured";
       smtp.classList.add("warn");
-      smtp.title = "Add SMTP_HOST, SMTP_USER and SMTP_PASS in Railway Variables";
+      smtp.title = meta.smtp?.railwayBlocksSmtp
+        ? "Railway blocks SMTP on Hobby — add RESEND_API_KEY"
+        : "Add RESEND_API_KEY or SMTP variables";
     }
   }
 
@@ -118,10 +126,10 @@
       meta.smtpConfigured = Boolean(diagnostics?.configured);
       meta.smtp = smtp || meta.smtp;
       renderSmtpPill();
-      if (check.ok) toast(`SMTP connected (${check.mode})`);
+      if (check.ok) toast(`Email connected (${check.mode || diagnostics?.provider})`);
       else {
-        const hint = diagnostics?.passHadNewline ? " Password may have a trailing newline in Railway." : "";
-        toast(`SMTP failed: ${check.error}${hint}`, true);
+        const hint = diagnostics?.hint || (diagnostics?.passHadNewline ? " Password may have a trailing newline in Railway." : "");
+        toast(`${check.error || "Email failed"}${hint ? ` — ${hint}` : ""}`, true);
       }
     } catch (err) {
       toast(err.message, true);
