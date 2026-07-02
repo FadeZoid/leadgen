@@ -61,7 +61,7 @@ async function geocodePostcodesIo(postcode) {
   const compact = postcode.replace(/\s+/g, "");
   const res = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(compact)}`, {
     headers: { "User-Agent": UA },
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(20_000),
   });
   if (!res.ok) return null;
   const data = await res.json();
@@ -81,7 +81,7 @@ export async function lookupArea(lat, lon) {
   try {
     const res = await fetch(`https://api.postcodes.io/postcodes?lon=${lon}&lat=${lat}&limit=1`, {
       headers: { "User-Agent": UA },
-      signal: AbortSignal.timeout(10_000),
+      signal: AbortSignal.timeout(20_000),
     });
     if (!res.ok) return null;
     const data = await res.json();
@@ -106,7 +106,7 @@ export async function geocode(place) {
   url.searchParams.set("countrycodes", "gb");
   url.searchParams.set("format", "json");
   url.searchParams.set("limit", "1");
-  const res = await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(15_000) });
+  const res = await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(25_000) });
   if (!res.ok) throw new Error(`Geocoding failed (${res.status})`);
   const results = await res.json();
   if (!results.length) throw new Error(`Couldn't find "${place}" — try a town name or postcode like "OL8 1QN".`);
@@ -128,7 +128,7 @@ export async function geocode(place) {
  * which is far faster than 22 separate value filters and doesn't time out on
  * dense town centres.
  */
-function buildAreaQuery(lat, lon, radiusM, tags) {
+function buildAreaQuery(lat, lon, radiusM, tags, serverTimeoutSec = 90) {
   const byKey = new Map();
   for (const t of tags) {
     if (!byKey.has(t.key)) byKey.set(t.key, new Set());
@@ -143,13 +143,20 @@ function buildAreaQuery(lat, lon, radiusM, tags) {
       );
     })
     .join("\n");
-  return `[out:json][timeout:50];\n(\n${clauses}\n);\nout center tags;`;
+  return `[out:json][timeout:${serverTimeoutSec}];\n(\n${clauses}\n);\nout center tags;`;
+}
+
+const OVERPASS_CLIENT_TIMEOUT_MS = 120_000;
+
+function isTimeoutError(err) {
+  const msg = err?.message || "";
+  return /timeout|aborted|timed out/i.test(msg);
 }
 
 async function overpassOnce(endpoint, query) {
   const res = await fetch(endpoint, {
     method: "POST",
-    signal: AbortSignal.timeout(45_000),
+    signal: AbortSignal.timeout(OVERPASS_CLIENT_TIMEOUT_MS),
     headers: { "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded" },
     body: `data=${encodeURIComponent(query)}`,
   });
@@ -163,12 +170,12 @@ async function overpassOnce(endpoint, query) {
 
 /**
  * Overpass allows ~2 concurrent slots per IP; when busy it 429s or times out.
- * Try each endpoint, then wait and retry once — dense UK town centres often
- * succeed on the second attempt.
+ * Try each endpoint, then wait and retry — cloud hosts (e.g. Railway) are often
+ * slower than a home connection, so we allow more attempts.
  */
 async function runOverpass(query) {
   let lastErr;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
     for (const endpoint of OVERPASS_ENDPOINTS) {
       try {
         return await overpassOnce(endpoint, query);
@@ -176,9 +183,42 @@ async function runOverpass(query) {
         lastErr = err;
       }
     }
-    if (attempt === 0) await sleep(20_000);
+    if (attempt < 2) await sleep(15_000);
   }
   throw lastErr;
+}
+
+function chunkTags(tags, size = 5) {
+  const chunks = [];
+  for (let i = 0; i < tags.length; i += size) chunks.push(tags.slice(i, i + size));
+  return chunks;
+}
+
+/** Smaller Overpass queries when one big combined query times out (common on cloud IPs). */
+async function runOverpassBatched(lat, lon, radiusM, tags) {
+  const merged = { elements: [] };
+  const seen = new Set();
+  for (const batch of chunkTags(tags, 5)) {
+    const data = await runOverpass(buildAreaQuery(lat, lon, radiusM, batch, 60));
+    for (const el of data.elements || []) {
+      const key = `${el.type}/${el.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      merged.elements.push(el);
+    }
+    await sleep(1200);
+  }
+  return merged;
+}
+
+async function queryBusinesses(lat, lon, radiusM, tags) {
+  const query = buildAreaQuery(lat, lon, radiusM, tags);
+  try {
+    return await runOverpass(query);
+  } catch (err) {
+    if (!isTimeoutError(err) && !err.rateLimited) throw err;
+    return runOverpassBatched(lat, lon, radiusM, tags);
+  }
 }
 
 function categorise(tags) {
@@ -239,7 +279,7 @@ export async function discover({ place, radiusM = 2000, categories = [] }) {
   const geo = await geocode(place);
   const wanted = TAG_MAP.filter((t) => !categories?.length || categories.includes(t.category));
 
-  const data = await runOverpass(buildAreaQuery(geo.lat, geo.lon, radiusM, wanted));
+  const data = await queryBusinesses(geo.lat, geo.lon, radiusM, wanted);
 
   const all = [];
   const seen = new Set();

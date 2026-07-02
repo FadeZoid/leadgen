@@ -99,28 +99,30 @@ export function runDiscoveryJob({ place, radiusM, categories, limit }) {
       store.logActivity(discoveryNote);
 
       // Enrichment: find emails for leads that have a website but no email yet.
-      const toEnrich = fresh.filter((l) => !l.email && l.website);
-      currentJob.phase = "enriching";
+      const skipEnrich = process.env.SKIP_ENRICHMENT === "true" || process.env.SKIP_ENRICHMENT === "1";
+      const toEnrich = skipEnrich ? [] : fresh.filter((l) => !l.email && l.website);
+      currentJob.phase = skipEnrich ? "routing" : "enriching";
       currentJob.enrichTotal = toEnrich.length;
 
-      const CONCURRENCY = 4;
-      let idx = 0;
-      async function worker() {
-        while (idx < toEnrich.length) {
-          const lead = toEnrich[idx++];
-          const { email, source } = await findEmail(lead.website);
-          if (email) {
-            store.updateLead(lead.id, { email, emailSource: source });
-            currentJob.emailsFound++;
+      if (toEnrich.length) {
+        const CONCURRENCY = 3;
+        let idx = 0;
+        async function worker() {
+          while (idx < toEnrich.length) {
+            const lead = toEnrich[idx++];
+            const { email, source } = await findEmail(lead.website);
+            if (email) {
+              store.updateLead(lead.id, { email, emailSource: source });
+              currentJob.emailsFound++;
+            }
+            currentJob.enriched++;
+            await sleep(250); // politeness between site fetches
           }
-          currentJob.enriched++;
-          await sleep(250); // politeness between site fetches
         }
+        await Promise.all(Array.from({ length: CONCURRENCY }, worker));
       }
-      await Promise.all(Array.from({ length: CONCURRENCY }, worker));
 
-      // Route every new lead to its queue now that enrichment is done.
-      currentJob.phase = "routing";
+      if (!skipEnrich) currentJob.phase = "routing";
       for (const lead of fresh) {
         const latest = store.getLead(lead.id);
         const queue = routeQueue(latest);
@@ -155,10 +157,17 @@ export function runDiscoveryJob({ place, radiusM, categories, limit }) {
       );
     } catch (err) {
       currentJob.state = "error";
-      currentJob.error = err.message;
-      store.logActivity(`Pipeline failed for "${place}": ${err.message}`);
+      currentJob.error = isTimeoutError(err)
+        ? `Map search timed out — try radius 1 km, limit 20, and fewer categories. (${err.message})`
+        : err.message;
+      store.logActivity(`Pipeline failed for "${place}": ${currentJob.error}`);
     }
   })();
 
   return currentJob;
+}
+
+function isTimeoutError(err) {
+  const msg = err?.message || "";
+  return /timeout|aborted|timed out/i.test(msg);
 }
