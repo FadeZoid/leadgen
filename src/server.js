@@ -1,15 +1,32 @@
 import express from "express";
+import fs from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
-import { loadEnvFile } from "node:process";
 import { fileURLToPath } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-try {
-  loadEnvFile(path.join(__dirname, "..", ".env"));
-} catch {
-  // .env is optional; process.env / defaults still apply
+
+function loadLocalEnv() {
+  const envPath = path.join(__dirname, "..", ".env");
+  if (!fs.existsSync(envPath)) return;
+  for (const line of fs.readFileSync(envPath, "utf8").split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+    const eq = trimmed.indexOf("=");
+    if (eq === -1) continue;
+    const key = trimmed.slice(0, eq).trim();
+    let val = trimmed.slice(eq + 1).trim();
+    if (
+      (val.startsWith('"') && val.endsWith('"')) ||
+      (val.startsWith("'") && val.endsWith("'"))
+    ) {
+      val = val.slice(1, -1);
+    }
+    if (!(key in process.env)) process.env[key] = val;
+  }
 }
+
+loadLocalEnv();
 
 import * as store from "./store.js";
 import { runDiscoveryJob, jobStatus, routeQueue } from "./pipeline.js";
