@@ -98,14 +98,19 @@ export function runDiscoveryJob({ place, radiusM, categories, limit }) {
       }
       store.logActivity(discoveryNote);
 
-      // Enrichment: find emails for leads that have a website but no email yet.
-      const skipEnrich = process.env.SKIP_ENRICHMENT === "true" || process.env.SKIP_ENRICHMENT === "1";
+      // Enrichment is the slowest step. Skip on Railway by default (map + queue still run at full speed).
+      // Set ENRICH_ON_RAILWAY=true to scrape websites from the cloud, or run discovery locally instead.
+      const onRailway = Boolean(process.env.RAILWAY_ENVIRONMENT);
+      const skipEnrich =
+        process.env.SKIP_ENRICHMENT === "true" ||
+        process.env.SKIP_ENRICHMENT === "1" ||
+        (onRailway && process.env.ENRICH_ON_RAILWAY !== "true");
       const toEnrich = skipEnrich ? [] : fresh.filter((l) => !l.email && l.website);
       currentJob.phase = skipEnrich ? "routing" : "enriching";
       currentJob.enrichTotal = toEnrich.length;
 
       if (toEnrich.length) {
-        const CONCURRENCY = 3;
+        const CONCURRENCY = 4;
         let idx = 0;
         async function worker() {
           while (idx < toEnrich.length) {

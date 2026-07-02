@@ -1,4 +1,7 @@
 # Railway reads env vars from the dashboard — no .env file in production.
+# Discovery skips website email scraping on Railway by default (fast). To enable:
+#   ENRICH_ON_RAILWAY=true
+# For full-speed discovery with enrichment, run locally (npm start) and upload data/leads.json.
 [build]
 builder = "RAILPACK"
 

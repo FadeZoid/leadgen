@@ -61,7 +61,7 @@ async function geocodePostcodesIo(postcode) {
   const compact = postcode.replace(/\s+/g, "");
   const res = await fetch(`https://api.postcodes.io/postcodes/${encodeURIComponent(compact)}`, {
     headers: { "User-Agent": UA },
-    signal: AbortSignal.timeout(20_000),
+    signal: AbortSignal.timeout(geoTimeoutMs()),
   });
   if (!res.ok) return null;
   const data = await res.json();
@@ -81,7 +81,7 @@ export async function lookupArea(lat, lon) {
   try {
     const res = await fetch(`https://api.postcodes.io/postcodes?lon=${lon}&lat=${lat}&limit=1`, {
       headers: { "User-Agent": UA },
-      signal: AbortSignal.timeout(20_000),
+      signal: AbortSignal.timeout(geoTimeoutMs()),
     });
     if (!res.ok) return null;
     const data = await res.json();
@@ -106,7 +106,7 @@ export async function geocode(place) {
   url.searchParams.set("countrycodes", "gb");
   url.searchParams.set("format", "json");
   url.searchParams.set("limit", "1");
-  const res = await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(25_000) });
+  const res = await fetch(url, { headers: { "User-Agent": UA }, signal: AbortSignal.timeout(nominatimTimeoutMs()) });
   if (!res.ok) throw new Error(`Geocoding failed (${res.status})`);
   const results = await res.json();
   if (!results.length) throw new Error(`Couldn't find "${place}" — try a town name or postcode like "OL8 1QN".`);
@@ -128,7 +128,7 @@ export async function geocode(place) {
  * which is far faster than 22 separate value filters and doesn't time out on
  * dense town centres.
  */
-function buildAreaQuery(lat, lon, radiusM, tags, serverTimeoutSec = 90) {
+function buildAreaQuery(lat, lon, radiusM, tags, serverTimeoutSec = overpassConfig().serverTimeoutSec) {
   const byKey = new Map();
   for (const t of tags) {
     if (!byKey.has(t.key)) byKey.set(t.key, new Set());
@@ -146,17 +146,10 @@ function buildAreaQuery(lat, lon, radiusM, tags, serverTimeoutSec = 90) {
   return `[out:json][timeout:${serverTimeoutSec}];\n(\n${clauses}\n);\nout center tags;`;
 }
 
-const OVERPASS_CLIENT_TIMEOUT_MS = 120_000;
-
-function isTimeoutError(err) {
-  const msg = err?.message || "";
-  return /timeout|aborted|timed out/i.test(msg);
-}
-
-async function overpassOnce(endpoint, query) {
+async function overpassOnce(endpoint, query, cfg = overpassConfig()) {
   const res = await fetch(endpoint, {
     method: "POST",
-    signal: AbortSignal.timeout(OVERPASS_CLIENT_TIMEOUT_MS),
+    signal: AbortSignal.timeout(cfg.clientTimeoutMs),
     headers: { "User-Agent": UA, "Content-Type": "application/x-www-form-urlencoded" },
     body: `data=${encodeURIComponent(query)}`,
   });
@@ -170,54 +163,66 @@ async function overpassOnce(endpoint, query) {
 
 /**
  * Overpass allows ~2 concurrent slots per IP; when busy it 429s or times out.
- * Try each endpoint, then wait and retry — cloud hosts (e.g. Railway) are often
- * slower than a home connection, so we allow more attempts.
  */
-async function runOverpass(query) {
+async function runOverpass(query, cfg = overpassConfig()) {
   let lastErr;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  for (let attempt = 0; attempt < cfg.attempts; attempt++) {
     for (const endpoint of OVERPASS_ENDPOINTS) {
       try {
-        return await overpassOnce(endpoint, query);
+        return await overpassOnce(endpoint, query, cfg);
       } catch (err) {
         lastErr = err;
       }
     }
-    if (attempt < 2) await sleep(15_000);
+    if (attempt < cfg.attempts - 1) await sleep(cfg.retryDelayMs);
   }
   throw lastErr;
 }
 
-function chunkTags(tags, size = 5) {
+function isTimeoutError(err) {
+  const msg = err?.message || "";
+  return /timeout|aborted|timed out/i.test(msg);
+}
+
+function chunkTags(tags, size = 10) {
   const chunks = [];
   for (let i = 0; i < tags.length; i += size) chunks.push(tags.slice(i, i + size));
   return chunks;
 }
 
-/** Smaller Overpass queries when one big combined query times out (common on cloud IPs). */
-async function runOverpassBatched(lat, lon, radiusM, tags) {
+/** Fallback only on cloud when the single combined query times out — 2 parallel small queries. */
+async function runOverpassBatched(lat, lon, radiusM, tags, cfg = overpassConfig()) {
   const merged = { elements: [] };
   const seen = new Set();
-  for (const batch of chunkTags(tags, 5)) {
-    const data = await runOverpass(buildAreaQuery(lat, lon, radiusM, batch, 60));
-    for (const el of data.elements || []) {
-      const key = `${el.type}/${el.id}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      merged.elements.push(el);
+  const batches = chunkTags(tags, 10);
+  const PARALLEL = 2;
+
+  for (let i = 0; i < batches.length; i += PARALLEL) {
+    const wave = batches.slice(i, i + PARALLEL);
+    const results = await Promise.all(
+      wave.map((batch) => runOverpass(buildAreaQuery(lat, lon, radiusM, batch, 50), cfg))
+    );
+    for (const data of results) {
+      for (const el of data.elements || []) {
+        const key = `${el.type}/${el.id}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.elements.push(el);
+      }
     }
-    await sleep(1200);
+    if (i + PARALLEL < batches.length) await sleep(800);
   }
   return merged;
 }
 
 async function queryBusinesses(lat, lon, radiusM, tags) {
-  const query = buildAreaQuery(lat, lon, radiusM, tags);
+  const cfg = overpassConfig();
+  const query = buildAreaQuery(lat, lon, radiusM, tags, cfg.serverTimeoutSec);
   try {
-    return await runOverpass(query);
+    return await runOverpass(query, cfg);
   } catch (err) {
-    if (!isTimeoutError(err) && !err.rateLimited) throw err;
-    return runOverpassBatched(lat, lon, radiusM, tags);
+    if (!cfg.batchedFallback || (!isTimeoutError(err) && !err.rateLimited)) throw err;
+    return runOverpassBatched(lat, lon, radiusM, tags, cfg);
   }
 }
 
@@ -268,6 +273,24 @@ function parseElement(el) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+const isCloudHost = () => Boolean(process.env.RAILWAY_ENVIRONMENT);
+
+/** Local = original fast settings. Cloud = slightly more patient, batched fallback only if needed. */
+function overpassConfig() {
+  if (isCloudHost()) {
+    return { clientTimeoutMs: 90_000, serverTimeoutSec: 60, attempts: 3, retryDelayMs: 12_000, batchedFallback: true };
+  }
+  return { clientTimeoutMs: 55_000, serverTimeoutSec: 50, attempts: 2, retryDelayMs: 20_000, batchedFallback: false };
+}
+
+function geoTimeoutMs() {
+  return isCloudHost() ? 20_000 : 10_000;
+}
+
+function nominatimTimeoutMs() {
+  return isCloudHost() ? 25_000 : 15_000;
+}
 
 /**
  * Discover businesses around a place.
