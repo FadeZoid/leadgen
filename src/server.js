@@ -30,6 +30,7 @@ loadLocalEnv();
 
 import * as store from "./store.js";
 import { runDiscoveryJob, jobStatus, routeQueue } from "./pipeline.js";
+import { isUsableOutreachEmail } from "./enrichment.js";
 import { buildQuote, CATEGORY_PROFILES, PRICING_TIERS } from "./quoting.js";
 import { DISCOVERABLE_CATEGORIES } from "./discovery.js";
 import { renderQuoteEmail, renderLetter, smtpConfigured, emailConfigured, smtpStatus, smtpDiagnostics, verifyEmail } from "./outreach.js";
@@ -40,6 +41,23 @@ const PORT = Number(process.env.PORT || 4000);
 const PASSWORD = process.env.DASH_PASSWORD || "dvpartners";
 
 store.init();
+
+/** Move chain HQs (e.g. stonegateenquiries@…) off the email queue. */
+function reconcileCorporateEmails() {
+  let fixed = 0;
+  for (const lead of store.allLeads()) {
+    if (!lead.email || isUsableOutreachEmail(lead.email, lead.website)) continue;
+    const cleared = { ...lead, email: null };
+    const queue = routeQueue(cleared);
+    store.updateLead(lead.id, { email: null, emailSource: null, queue });
+    fixed++;
+  }
+  if (fixed) {
+    store.logActivity(`Re-routed ${fixed} leads with group/corporate emails (e.g. Stonegate) to call/letter queue`);
+    console.log(`Re-routed ${fixed} leads with corporate central inboxes`);
+  }
+}
+reconcileCorporateEmails();
 
 const app = express();
 app.use(express.json());
@@ -153,7 +171,8 @@ app.patch("/api/leads/:id", auth, (req, res) => {
   const patch = {};
 
   if (email !== undefined) {
-    patch.email = email?.trim() || null;
+    const trimmed = email?.trim() || null;
+    patch.email = trimmed && isUsableOutreachEmail(trimmed, lead.website) ? trimmed : null;
     if (patch.email) patch.emailSource = "manual";
   }
   if (phone !== undefined) patch.phone = phone?.trim() || null;

@@ -7,7 +7,7 @@
  *   - letter → no email and no phone (print & post, via Stannp if configured)
  */
 import { discover } from "./discovery.js";
-import { findEmail } from "./enrichment.js";
+import { findEmail, isUsableOutreachEmail } from "./enrichment.js";
 import { buildQuote } from "./quoting.js";
 import { dispatchQuoteEmail } from "./emailDispatch.js";
 import * as store from "./store.js";
@@ -21,7 +21,7 @@ export function jobStatus() {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export function routeQueue(lead) {
-  if (lead.email) return "email";
+  if (lead.email && isUsableOutreachEmail(lead.email, lead.website)) return "email";
   if (lead.phone) return "call";
   return "letter";
 }
@@ -113,7 +113,7 @@ export function runDiscoveryJob({ place, radiusM, categories, limit }) {
           while (idx < toEnrich.length) {
             const lead = toEnrich[idx++];
             const { email, source } = await findEmail(lead.website);
-            if (email) {
+            if (email && isUsableOutreachEmail(email, lead.website)) {
               store.updateLead(lead.id, { email, emailSource: source });
               currentJob.emailsFound++;
             }
